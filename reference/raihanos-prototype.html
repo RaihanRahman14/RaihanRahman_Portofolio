@@ -1,0 +1,949 @@
+<title>RaihanOS</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap">
+<style>
+/* Layout: an OS desktop — top bar, wallpaper canvas with file icons, floating windows, taskbar. Phones get a home-screen grid and full-screen apps. Themes switch via body[data-term]. */
+:root {
+  color-scheme: dark;
+  --font: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --bg: #0B1020; --win: #0E1428; --panel: #131B36; --border: #24305A;
+  --fg: #D6DCE8; --dim: #8A96B0; --user: #F2B866; --path: #7CC7F2;
+  --accent: #8FD6A6; --err: #F28B82; --sel: rgba(124,199,242,.25);
+  --bar-h: 36px; --task-h: 48px;
+}
+body[data-term="matrix"]   { --bg:#030803; --win:#060E06; --panel:#0B170C; --border:#1B3A1F; --fg:#B8F5C2; --dim:#6FAA79; --user:#6EF28A; --path:#A8F0B5; --accent:#6EF28A; --err:#FF7B7B; --sel:rgba(110,242,138,.22) }
+body[data-term="amber"]    { --bg:#100A02; --win:#160F04; --panel:#1E1507; --border:#43310F; --fg:#FFCF8A; --dim:#B9935A; --user:#FFB43D; --path:#FFDDA8; --accent:#FFC266; --err:#FF8A65; --sel:rgba(255,180,61,.22) }
+body[data-term="sentinel"] { --bg:#081325; --win:#0C1A31; --panel:#11223F; --border:#22406B; --fg:#DCE8F7; --dim:#8DA2C0; --user:#4FB3FF; --path:#9CD3FF; --accent:#59D1C3; --err:#FF8F8F; --sel:rgba(79,179,255,.25) }
+body[data-term="paper"]    { color-scheme: light; --bg:#DDE3EB; --win:#F7F9FB; --panel:#EAEEF3; --border:#BCC6D3; --fg:#1A2230; --dim:#556072; --user:#8A4F00; --path:#0B5FA5; --accent:#1C7344; --err:#B42318; --sel:rgba(11,95,165,.18) }
+
+html, body { height: 100%; overflow: hidden; }
+body { background: var(--bg); color: var(--fg); font-family: var(--font); font-size: 14px; line-height: 1.55; }
+::selection { background: var(--sel); }
+button { font: inherit; color: inherit; }
+a { color: var(--path); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--path) 45%, transparent); text-underline-offset: 3px; }
+a:hover { text-decoration-color: currentColor; }
+:focus-visible { outline: 2px solid var(--path); outline-offset: 2px; border-radius: 4px; }
+svg.i { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* ---------- shell ---------- */
+#os { position: fixed; inset: 0; display: flex; flex-direction: column; }
+.topbar { height: var(--bar-h); flex: none; display: flex; align-items: center; gap: 4px; background: var(--panel); border-bottom: 1px solid var(--border); font-size: 13px;
+  padding-left: max(8px, env(safe-area-inset-left, 0px)); padding-right: max(12px, env(safe-area-inset-right, 0px)); padding-top: env(safe-area-inset-top, 0px); box-sizing: content-box; }
+.topbar .brand { display: flex; align-items: center; gap: 8px; background: none; border: 0; padding: 6px 10px; border-radius: 6px; cursor: pointer; font-weight: 700; }
+.topbar .brand:hover, .topbar .brand[aria-expanded="true"] { background: var(--border); }
+.topbar .brand b { color: var(--user); }
+.topbar .spacer { flex: 1; }
+.topbar .stat { color: var(--dim); display: flex; align-items: center; gap: 6px; padding: 0 8px; white-space: nowrap; }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
+
+.desk { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+#wall { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.icons { position: absolute; inset: 16px auto 16px max(16px, env(safe-area-inset-left, 0px)); display: grid; grid-auto-flow: column; grid-template-rows: repeat(auto-fill, 92px); gap: 6px 10px; align-content: start; }
+.icon { width: 92px; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 4px; background: none; border: 1px solid transparent; border-radius: 10px; cursor: pointer; text-align: center; }
+.icon:hover, .icon:focus-visible { background: color-mix(in srgb, var(--panel) 80%, transparent); border-color: var(--border); }
+.icon .glyph { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 12px; background: var(--win); border: 1px solid var(--border); color: var(--path); }
+.icon .glyph svg.i { width: 24px; height: 24px; }
+.icon[data-app="terminal"] .glyph, .icon[data-app="portscan"] .glyph { color: var(--user); }
+.icon[data-app="certs"] .glyph { color: var(--accent); }
+.icon .lbl { font-size: 12px; line-height: 1.3; color: var(--fg); text-shadow: 0 1px 2px var(--bg); word-break: break-word; }
+
+.taskbar { height: var(--task-h); flex: none; display: flex; align-items: center; gap: 6px; background: var(--panel); border-top: 1px solid var(--border); overflow-x: auto;
+  padding: 0 max(10px, env(safe-area-inset-right, 0px)) env(safe-area-inset-bottom, 0px) max(10px, env(safe-area-inset-left, 0px)); box-sizing: content-box; }
+.taskbar .hint { color: var(--dim); font-size: 12px; white-space: nowrap; padding: 0 6px; }
+.task { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--win); cursor: pointer; white-space: nowrap; color: var(--dim); }
+.task.active { color: var(--fg); border-color: var(--path); }
+.task.min { opacity: .65; }
+
+/* ---------- windows ---------- */
+.win { position: absolute; display: flex; flex-direction: column; background: var(--win); border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+  box-shadow: 0 18px 50px rgba(0,0,0,.45), 0 2px 6px rgba(0,0,0,.25); min-width: 280px; max-width: calc(100% - 16px); max-height: calc(100% - 16px); }
+body[data-term="paper"] .win { box-shadow: 0 18px 40px rgba(20,30,50,.18), 0 2px 6px rgba(20,30,50,.08); }
+.win.min { display: none; }
+.win.max { inset: 0 !important; width: auto !important; height: auto !important; max-width: none; max-height: none; border-radius: 0; border-width: 0; }
+.wbar { flex: none; display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 6px 0 12px; background: var(--panel); border-bottom: 1px solid var(--border); cursor: grab; user-select: none; touch-action: none; }
+.win.max .wbar, .win.dragging .wbar { cursor: default; }
+.win:not(.focused) .wbar { color: var(--dim); }
+.wbar .wt { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
+.wbtns { display: flex; gap: 2px; }
+.wbtns button { width: 34px; height: 30px; display: grid; place-items: center; background: none; border: 0; border-radius: 6px; cursor: pointer; color: var(--dim); }
+.wbtns button:hover { background: var(--border); color: var(--fg); }
+.wbtns button.close:hover { background: var(--err); color: var(--win); }
+.wbtns .back { display: none; }
+.wbody { flex: 1; min-height: 0; overflow: auto; }
+.pad { padding: 20px 22px 28px; }
+
+/* ---------- terminal app ---------- */
+.term { height: 100%; display: flex; flex-direction: column; background: var(--bg); }
+.screen { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 16px 18px 22px; overscroll-behavior: contain; font-size: 14.5px; }
+.ln { white-space: pre-wrap; overflow-wrap: anywhere; min-height: 1.55em; }
+.banner { white-space: pre; overflow-wrap: normal; font-size: clamp(6px, 1.75vw, 13px); line-height: 1.08; color: var(--user); min-height: 0; }
+.u { color: var(--user); } .p { color: var(--path); } .dim { color: var(--dim); }
+.ok { color: var(--accent); } .err { color: var(--err); } .b { font-weight: 700; color: var(--fg); }
+.h { color: var(--path); font-weight: 700; }
+.ln button { background: none; border: 0; padding: 0; cursor: pointer; color: var(--accent); text-decoration: underline dotted; text-underline-offset: 3px; }
+.prompt { display: flex; flex-wrap: wrap; align-items: baseline; }
+.prompt label { white-space: pre; }
+#cmd { flex: 1 1 8ch; min-width: 0; font: inherit; color: var(--fg); background: transparent; border: 0; outline: none; padding: 0; caret-color: var(--accent); }
+.chips { display: flex; gap: 8px; padding: 8px 10px; border-top: 1px solid var(--border); background: var(--panel); overflow-x: auto; scrollbar-width: thin; }
+.chips button { font-size: 12.5px; background: var(--win); border: 1px solid var(--border); border-radius: 8px; padding: 0 12px; min-height: 38px; white-space: nowrap; cursor: pointer; flex: none; }
+.chips button:hover { border-color: var(--path); color: var(--path); }
+.chips .sep { flex: none; width: 1px; align-self: stretch; margin: 4px 2px; background: var(--border); }
+.chips .lead { color: var(--dim); align-self: center; font-size: 12px; white-space: nowrap; }
+
+/* ---------- GUI apps ---------- */
+.app h2 { margin: 0 0 4px; font-size: 18px; color: var(--fg); text-wrap: balance; }
+.app h3 { margin: 0; font-size: 15px; }
+.app p { margin: 0 0 12px; max-width: 68ch; }
+.app .meta { color: var(--dim); font-size: 12.5px; }
+.lbl-sm { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
+.btn { display: inline-flex; align-items: center; gap: 8px; min-height: 38px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--fg); text-decoration: none; cursor: pointer; font-size: 13px; }
+.btn:hover { border-color: var(--path); color: var(--path); }
+.btn.primary { background: var(--user); border-color: var(--user); color: var(--win); font-weight: 700; }
+.btn.primary:hover { color: var(--win); filter: brightness(1.08); }
+.row { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { font-size: 12px; padding: 3px 9px; border: 1px solid var(--border); border-radius: 6px; color: var(--fg); background: var(--panel); }
+
+.about { display: flex; flex-wrap: wrap; gap: 22px; align-items: flex-start; }
+.about img { width: 132px; height: 132px; border-radius: 12px; border: 1px solid var(--border); object-fit: cover; flex: none; }
+.about .txt { flex: 1 1 320px; min-width: 0; }
+
+.explorer { display: flex; height: 100%; }
+.explorer nav { flex: 0 0 200px; border-right: 1px solid var(--border); padding: 10px; display: flex; flex-direction: column; gap: 4px; background: var(--panel); }
+.explorer nav button { display: flex; align-items: center; gap: 10px; text-align: left; background: none; border: 1px solid transparent; border-radius: 8px; padding: 9px 10px; cursor: pointer; }
+.explorer nav button[aria-current="true"] { background: var(--win); border-color: var(--border); color: var(--path); }
+.explorer .pane { flex: 1; min-width: 0; overflow: auto; }
+.pipeline { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); font-size: 12.5px; line-height: 1.85; }
+.pipeline span { color: var(--user); }
+
+.certs { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+.cert { position: relative; border: 1px solid var(--border); border-radius: 10px; padding: 14px 14px 12px; background: var(--panel); display: flex; flex-direction: column; gap: 10px; }
+.cert .stamp { align-self: flex-start; font-size: 11px; font-weight: 700; letter-spacing: .1em; padding: 3px 8px; border: 1.5px solid var(--accent); color: var(--accent); border-radius: 4px; transform: rotate(-3deg); text-decoration: none; }
+.cert .stamp.idonly { border-color: var(--dim); color: var(--dim); transform: none; font-weight: 400; letter-spacing: 0; }
+.cert.past .stamp { border-color: var(--dim); color: var(--dim); }
+
+.log { font-size: 13px; }
+.log .entry { display: grid; grid-template-columns: 150px 1fr; gap: 4px 16px; padding: 14px 0; border-bottom: 1px dashed var(--border); }
+.log .ts { color: var(--dim); }
+.log ul { margin: 6px 0 0; padding-left: 18px; }
+.log .lvl { font-size: 11px; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--path); color: var(--path); margin-right: 8px; }
+
+.feed a.item { display: flex; gap: 14px; align-items: baseline; padding: 14px 0; border-bottom: 1px solid var(--border); text-decoration: none; color: var(--fg); }
+.feed a.item:hover .t { color: var(--path); }
+.feed .n { color: var(--dim); font-variant-numeric: tabular-nums; }
+
+.vcard { display: flex; flex-wrap: wrap; gap: 20px; align-items: center; padding: 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); }
+.vcard img { width: 84px; height: 84px; border-radius: 50%; object-fit: cover; border: 1px solid var(--border); }
+.kv { display: grid; grid-template-columns: 100px 1fr; gap: 8px 14px; margin-top: 18px; }
+.kv dt { color: var(--dim); } .kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+
+.scan .bar { height: 6px; border-radius: 3px; background: var(--panel); border: 1px solid var(--border); overflow: hidden; margin: 12px 0 16px; }
+.scan .bar i { display: block; height: 100%; width: 0; background: var(--user); transition: width .12s linear; }
+.scan table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.scan th { text-align: left; color: var(--dim); font-weight: 400; padding: 6px 10px 6px 0; border-bottom: 1px solid var(--border); }
+.scan td { padding: 7px 10px 7px 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent); white-space: nowrap; }
+.scan td.open { color: var(--accent); }
+.scan .tbl { overflow-x: auto; }
+.skills { display: flex; flex-direction: column; gap: 12px; margin-top: 22px; }
+
+/* ---------- menus & boot ---------- */
+.menu { position: fixed; z-index: 9000; min-width: 220px; background: var(--win); border: 1px solid var(--border); border-radius: 10px; padding: 6px; box-shadow: 0 14px 40px rgba(0,0,0,.4); }
+.menu button, .menu .sub { display: flex; width: 100%; align-items: center; gap: 10px; text-align: left; background: none; border: 0; border-radius: 6px; padding: 8px 10px; cursor: pointer; font-size: 13px; }
+.menu button:hover, .menu button:focus-visible { background: var(--panel); color: var(--path); outline: none; }
+.menu hr { border: 0; border-top: 1px solid var(--border); margin: 5px 4px; }
+.menu .sub { color: var(--dim); cursor: default; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; padding-bottom: 2px; }
+.menu .on::after { content: "●"; margin-left: auto; color: var(--accent); font-size: 10px; }
+
+#boot { position: fixed; inset: 0; z-index: 10000; background: #05070D; color: #B9C2D3; padding: max(20px, env(safe-area-inset-top, 0px)) max(20px, env(safe-area-inset-right, 0px)) 20px max(20px, env(safe-area-inset-left, 0px)); font-size: 13px; overflow: hidden; transition: opacity .35s; }
+#boot.out { opacity: 0; pointer-events: none; }
+#boot .ok { color: #8FD6A6; } #boot .w { color: #F2B866; }
+#boot .skip { position: absolute; right: max(20px, env(safe-area-inset-right, 0px)); bottom: max(16px, env(safe-area-inset-bottom, 0px)); color: #6B7590; font-size: 12px; }
+
+/* ---------- tablet & phone ---------- */
+@media (max-width: 640px) {
+  :root { --task-h: 52px; }
+  .icons { inset: 18px max(16px, env(safe-area-inset-right, 0px)) auto max(16px, env(safe-area-inset-left, 0px)); grid-auto-flow: row; grid-template-rows: none; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px 6px; }
+  .icon { width: auto; }
+  .icon .glyph { width: 54px; height: 54px; border-radius: 16px; }
+  .win { inset: 0 !important; width: auto !important; height: auto !important; max-width: none; max-height: none; border-radius: 0; border-width: 0; box-shadow: none; }
+  .wbar { cursor: default; height: 44px; }
+  .wbtns .min, .wbtns .max, .wbtns .close { display: none; }
+  .wbtns .back { display: grid; width: auto; padding: 0 12px; gap: 6px; grid-auto-flow: column; color: var(--path); }
+  .wbar { flex-direction: row-reverse; padding: 0 12px 0 4px; }
+  .wbar .wi { display: none; }
+  .explorer { flex-direction: column; }
+  .explorer nav { flex: none; flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--border); }
+  .log .entry { grid-template-columns: 1fr; }
+  #cmd { font-size: 16px; }
+  .chips .lead, .taskbar .hint { display: none; }
+  .topbar .stat.on { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { #boot, .scan .bar i { transition: none; } }
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-term" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M12.5 15H17"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></symbol>
+  <symbol id="i-log" viewBox="0 0 24 24"><path d="M4 6h2M4 12h2M4 18h2M9 6h11M9 12h11M9 18h7"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6z"/><path d="M9 12l2 2 4-4"/></symbol>
+  <symbol id="i-archive" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9M10 13h4"/></symbol>
+  <symbol id="i-pen" viewBox="0 0 24 24"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></symbol>
+  <symbol id="i-card" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="11" r="2.2"/><path d="M5.8 16c.6-1.6 1.8-2.4 3.2-2.4s2.6.8 3.2 2.4M14.5 10H18M14.5 13.5H18"/></symbol>
+  <symbol id="i-pdf" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M12 11v6M9.5 14.5L12 17l2.5-2.5"/></symbol>
+  <symbol id="i-radar" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><path d="M12 12l6-6"/><circle cx="15.5" cy="9" r=".8"/></symbol>
+  <symbol id="i-min" viewBox="0 0 24 24"><path d="M6 12h12"/></symbol>
+  <symbol id="i-max" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M7 7l10 10M17 7L7 17"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></symbol>
+  <symbol id="i-logo" viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M9 10l2 2-2 2M13 14h2.5"/></symbol>
+</svg>
+
+<div id="boot" aria-hidden="true"><div id="bootlog"></div><span class="skip">press any key or tap to skip</span></div>
+
+<div id="os">
+  <header class="topbar">
+    <button class="brand" id="brand" type="button" aria-haspopup="menu" aria-expanded="false"><svg class="i"><use href="#i-logo"/></svg><span><b>Raihan</b>OS</span></button>
+    <span class="spacer"></span>
+    <span class="stat on"><span class="dot" aria-hidden="true"></span>online</span>
+    <span class="stat" id="clock" aria-label="Jakarta time">--:-- WIB</span>
+  </header>
+  <main class="desk" id="desk" aria-label="Desktop">
+    <canvas id="wall" aria-hidden="true"></canvas>
+    <nav class="icons" id="icons" aria-label="Apps and files"></nav>
+  </main>
+  <footer class="taskbar" id="taskbar" aria-label="Open windows"><span class="hint">right-click the desktop for more</span></footer>
+</div>
+<div class="sr" id="live" aria-live="polite"></div>
+
+<template id="tpl-term">
+  <div class="term">
+    <div class="screen" id="screen">
+      <div id="bootout"></div>
+      <div id="out"></div>
+      <form class="prompt" id="form" autocomplete="off">
+        <label for="cmd"><span class="u">hacker@raihanrahman</span>:<span class="p">~</span>$ </label>
+        <input id="cmd" name="cmd" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go" aria-label="Type a command, for example help">
+      </form>
+    </div>
+    <nav class="chips" aria-label="Quick commands">
+      <span class="lead">tap or type ›</span>
+      <button type="button" data-run="help">help</button>
+      <button type="button" data-run="ls">list</button>
+      <button type="button" data-act="tab" title="Autocomplete what you've typed (Tab)">⇥ tab</button>
+      <button type="button" data-run="clear">clear</button>
+      <button type="button" data-run="gui">gui</button>
+      <span class="sep" aria-hidden="true"></span>
+      <button type="button" data-run="about">about</button>
+      <button type="button" data-run="projects">projects</button>
+      <button type="button" data-run="experience">experience</button>
+      <button type="button" data-run="certs">certs</button>
+      <button type="button" data-run="skills">skills</button>
+      <button type="button" data-run="writing">writing</button>
+      <button type="button" data-run="contact">contact</button>
+      <button type="button" data-run="cv">cv</button>
+      <button type="button" data-run="theme">theme</button>
+    </nav>
+  </div>
+</template>
+
+<script>
+(() => {
+  "use strict";
+  const PHOTO = "data:image/webp;base64,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";
+  const $ = (id) => document.getElementById(id);
+  const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const finePointer = matchMedia("(pointer: fine)").matches;
+  const phone = matchMedia("(max-width: 640px)");
+  const tablet = matchMedia("(min-width: 641px) and (max-width: 1024px)");
+  const PREVIEW = !/raihanrahman\.pages\.dev$/.test(location.hostname);
+  const live = $("live");
+
+  /* =====================================================================
+     CONTENT — one source for terminal, GUI apps and (later) cv.pdf
+     ===================================================================== */
+  const C = {
+    name: "Raihan Rahman",
+    role: "SOC Analyst (L1) · Cybersecurity student at BINUS University",
+    links: {
+      email: "raihan.sec14@gmail.com",
+      linkedin: ["linkedin.com/in/raihan-rahman-411186214", "https://www.linkedin.com/in/raihan-rahman-411186214"],
+      github: ["github.com/RaihanRahman14", "https://github.com/RaihanRahman14"],
+      tryhackme: ["tryhackme.com/p/minzelo14", "https://tryhackme.com/p/minzelo14"],
+      medium: ["medium.com/@minzelo14", "https://medium.com/@minzelo14"],
+      instagram: ["@raihan.security", "https://www.instagram.com/raihan.security"],
+    },
+    about: [
+      "I work as a Level 1 SOC analyst in Compnet's Managed Security Services division, monitoring and triaging alerts across multiple enterprise environments on rotating 24/7 shifts.",
+      "Most of my day is spent in Azure Sentinel: writing KQL to dig through logs, checking whether a detection holds up, and deciding what needs to go to L2. Alerts come in from FortiGate, Cisco Firepower, Trend Micro Vision One, SentinelOne, CrowdStrike, Bitdefender and Azure WAF.",
+      "Real cases I've worked include shadow copy deletion on an endpoint (often the last step before ransomware detonates), Log4Shell exploitation attempts, and SQL injection, command injection and path traversal against WAFs. Where needed I've taken containment actions: blocking IPs, running device scans, isolating hosts.",
+      "Plenty of alerts turn out to be nothing, and closing those correctly is its own skill: proving the activity is benign, then writing the exclusion so the same alert doesn't return next shift. I map findings to MITRE ATT&CK and follow NIST SP 800-61r3.",
+      "Long term I'm working toward security consulting and GRC: helping organisations make good security decisions, not just respond to bad days.",
+    ],
+    education: { school: "BINUS University", degree: "Bachelor's degree, Cybersecurity", when: "2023 – 2027 (expected)" },
+    experience: [
+      { when: "2026-02 → now", role: "Security Analyst L1 (Internship)", org: "PT Nusantara Compnet Integrator", where: "Jakarta",
+        points: ["Triage alerts for multiple enterprise clients, 24/7 on 12-hour shifts",
+                 "Investigate SIEM, EDR, firewall and WAF detections with KQL in Azure Sentinel",
+                 "Escalate confirmed incidents to L2; contain (IP blocks, host isolation, scans)",
+                 "Tune false positives and write exclusions to cut recurring noise",
+                 "Run vulnerability triage and regular reporting"] },
+      { when: "2025-07 → 2025-08", role: "Chief Marketing Officer", org: "qrbn.app", where: "Jakarta",
+        points: ["Grew exposure for a blockchain-based Islamic donation platform through Instagram content and competition materials"] },
+      { when: "2024", role: "Leadership & volunteering", org: "Cyber Security Community BINUS", where: "Jakarta",
+        points: ["Project Manager: coordinated 41 volunteer instructors teaching security awareness to 130 students at SMAN 85 Jakarta",
+                 "Speaker: \"Hacking With Linux\" at CSC Cyber Class", "Media Team Lead"] },
+    ],
+    projects: [
+      { id: "ioc-router", alias: ["ioc", "iocrouter"], name: "IOC Router", tag: "featured",
+        desc: "Threat intelligence enrichment platform for L1 SOC triage. Paste IPs, domains, URLs, hashes or emails and get one verdict aggregated from up to 11 providers (VirusTotal, AbuseIPDB, Shodan, ThreatFox, Hybrid Analysis and more).",
+        more: "100+ severity-rated flags mapped to MITRE ATT&CK, 0–100 confidence scoring, local command-line and WAF payload analysis, and AI-drafted incident tickets.",
+        why: "Built because checking one IP across six browser tabs mid-shift is a bad use of time.",
+        stack: ["Python", "Streamlit", "Threat-intel APIs", "MITRE ATT&CK", "Gemini / Groq"],
+        pipeline: ["parse & detect IOC type", "local analysis (cmdline · process · WAF)", "route to relevant providers", "extract 100+ threat flags", "verdict + confidence 0–100", "threat state, level & geo", "AI incident ticket"],
+        demo: "https://ioc-router.streamlit.app", repo: "https://github.com/RaihanRahman14/IOC-Router-v2" },
+      { id: "hackngo", alias: ["hack-n-go", "hackn-go"], name: "Hack'n Go", tag: "team of 5 · backend",
+        desc: "Duolingo-inspired web app that makes learning cybersecurity feel like progress instead of punishment: OWASP Top 10 and ISO 27001 modules, randomised quizzes, instant feedback, XP and daily challenges.",
+        more: "Built by a five-person team for a Software Engineering course. My part: the backend.",
+        stack: ["Node.js", "JavaScript", "Gamified learning"],
+        repo: "https://github.com/RaihanRahman14/Hack-n-Go" },
+    ],
+    certs: [
+      { n: "Security Analyst Level 1 (SAL1)", i: "TryHackMe", d: "Oct 2026 – Oct 2029", v: "https://assets.tryhackme.com/certification-certificate/6adb90d3ac485ecb3bb413aa.pdf" },
+      { n: "SOC Level 1", i: "TryHackMe", d: "Oct 2026 – Oct 2029", v: "https://tryhackme.com/certificate/THM-LA5OOPWKYD" },
+      { n: "Microsoft Sentinel: Complete Azure Introduction", i: "Packt", d: "Apr 2026", v: "https://www.coursera.org/account/accomplishments/verify/9X6BF7HS85X1" },
+      { n: "DevOps", i: "ID-Networkers", d: "Jul 2025", id: "CERT0523216971" },
+      { n: "Linux System Administrator", i: "ID-Networkers", d: "Jul 2025", id: "CERT0521716972" },
+      { n: "EF SET English — C1 Advanced (63/100)", i: "EF SET", d: "May 2025", v: "https://cert.efset.org/en/ko8UAS" },
+      { n: "Introduction to Information Security", i: "Cyber Academy Indonesia", d: "Mar 2023", v: "https://www.cyberacademy.id/certificate/PKMI1103230429" },
+    ],
+    pastCerts: [
+      { n: "Certified Ethical Hacker (CEH)", i: "EC-Council", d: "Jul 2023 – Jun 2026", v: "https://aspen.eccouncil.org/Certificate/Certificate?a=eof6foV0K5/d/w5hmSyIRQ==" },
+      { n: "Introduction to L1 SOC", i: "Jadi Hacker", d: "Oct 2025 – Oct 2026", v: "https://jadihacker.id/certificate/jh-soc-b09-10/" },
+      { n: "Security Manpower Training Program", i: "INKOR", d: "Aug 2025 – Aug 2026", id: "SMTP2025-077RRSP" },
+      { n: "Android Penetration Testing", i: "Jadi Hacker", d: "Apr 2025 – Apr 2026", v: "https://jadihacker.id/certificate/jh-apt-02-006/" },
+      { n: "Web Penetration Tester", i: "Jadi Hacker", d: "Jan 2025 – Jan 2026", v: "https://jadihacker.id/certificate/jh-wpt-19-021/" },
+    ],
+    skills: [
+      ["security-ops", ["Azure Sentinel", "KQL", "Splunk", "Elastic", "Wazuh", "Alert triage", "Incident response", "Log analysis", "Vulnerability management"]],
+      ["frameworks", ["MITRE ATT&CK", "NIST SP 800-61r3", "OWASP Top 10", "ISO 27001"]],
+      ["offensive", ["Penetration testing", "Burp Suite", "Nmap", "SQLmap", "OSINT"]],
+      ["infra", ["Linux (Ubuntu)", "DNS", "Nginx / Apache", "Docker", "Jenkins", "Grafana"]],
+      ["dev", ["Python", "C", "JavaScript / Node.js", "Java"]],
+      ["languages", ["Indonesian (native)", "English (professional, C1)"]],
+    ],
+    ports: [["22/tcp", "ssh", "linux sysadmin"], ["443/tcp", "azure-sentinel", "kql hunting"], ["1337/tcp", "ctf-player", "crypto · rev · web · forensics"],
+            ["1514/tcp", "wazuh-agent", "siem"], ["3000/tcp", "hackngo", "node.js"], ["8089/tcp", "splunkd", "siem"],
+            ["8501/tcp", "ioc-router", "streamlit"], ["9200/tcp", "elasticsearch", "siem"]],
+    articles: [
+      ["What Is SECaaS? Benefits, Risks, and How to Choose the Right Provider", "https://medium.com/@minzelo14/what-is-secaas-benefits-risks-and-how-to-choose-the-right-provider-778fee404b19"],
+      ["Enterprise Security Without the Overhead: How LSware Handles Vulnerability and Access at Scale", "https://medium.com/@minzelo14/enterprise-security-without-the-overhead-how-lsware-handles-vulnerability-and-access-at-scale-ded21b3fd85a"],
+      ["Piecing Together the Internet's Puzzle", "https://medium.com/@minzelo14/piecing-together-the-internets-puzzle-6436ce9456ea"],
+      ["From Power Poles to Street Signs: The Art of OSINT Geolocation", "https://medium.com/@minzelo14/from-power-poles-to-street-signs-the-art-of-osint-geolocation-b268c3892968"],
+      ["Dark Web Diaries: Where Your Password Goes After You Forget It", "https://medium.com/@minzelo14/dark-web-diaries-where-your-password-goes-after-you-forget-it-f314f2bcc7c8"],
+    ],
+  };
+
+  const THEMES = { nightshift: "ink blue, amber prompt (default)", sentinel: "azure blues, for the KQL hours", matrix: "green phosphor on black", amber: "1980s amber CRT", paper: "light, for daytime reading" };
+
+  /* ---------- tiny DOM builder (textContent only, never innerHTML) ---------- */
+  function h(tag, attrs, ...kids) {
+    const el = document.createElement(tag);
+    if (attrs) for (const [k, v] of Object.entries(attrs)) {
+      if (v == null || v === false) continue;
+      if (k === "class") el.className = v;
+      else if (k === "on") for (const [ev, fn] of Object.entries(v)) el.addEventListener(ev, fn);
+      else el.setAttribute(k, v === true ? "" : v);
+    }
+    for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid.nodeType ? kid : String(kid));
+    return el;
+  }
+  const ext = (text, href, cls) => h("a", { href, target: "_blank", rel: "noopener noreferrer", class: cls }, text);
+  const icon = (id, cls) => { const s = document.createElementNS("http://www.w3.org/2000/svg", "svg"); s.setAttribute("class", "i" + (cls ? " " + cls : "")); s.setAttribute("aria-hidden", "true"); const u = document.createElementNS("http://www.w3.org/2000/svg", "use"); u.setAttribute("href", "#i-" + id); s.append(u); return s; };
+
+  /* =====================================================================
+     APPS (GUI)
+     ===================================================================== */
+  const APPS = {
+    terminal:   { title: "Terminal — hacker@raihanrahman", label: "Terminal", ico: "term", w: 880, h: 580 },
+    about:      { title: "about.txt", label: "about.txt", ico: "file", w: 640, h: 560, build: buildAbout },
+    experience: { title: "experience.log", label: "experience.log", ico: "log", w: 700, h: 560, build: buildExperience },
+    projects:   { title: "~/projects", label: "projects/", ico: "folder", w: 820, h: 560, build: buildProjects },
+    certs:      { title: "~/certs — verified", label: "certs/", ico: "shield", w: 760, h: 540, build: () => buildCerts(false) },
+    writing:    { title: "~/writing — feed", label: "writing/", ico: "pen", w: 640, h: 500, build: buildWriting },
+    portscan:   { title: "Port Scanner — target: raihan", label: "Port Scanner", ico: "radar", w: 700, h: 600, build: buildScan },
+    contact:    { title: "contact.vcf", label: "contact.vcf", ico: "card", w: 560, h: 520, build: buildContact },
+    cv:         { title: "cv.pdf", label: "cv.pdf", ico: "pdf", w: 480, h: 360, build: buildCV },
+    archive:    { title: "~/archive — past certifications", label: "archive/", ico: "archive", w: 720, h: 480, build: () => buildCerts(true) },
+  };
+
+  function buildAbout() {
+    return h("div", { class: "app pad" },
+      h("div", { class: "about" },
+        h("img", { src: PHOTO, alt: "Portrait of Raihan Rahman", width: 132, height: 132 }),
+        h("div", { class: "txt" },
+          h("h2", null, C.name), h("p", { class: "meta" }, C.role + " · Jakarta"),
+          h("div", { class: "row", style: "margin:12px 0 18px" },
+            h("button", { class: "btn primary", type: "button", on: { click: () => openApp("projects") } }, "See projects"),
+            h("button", { class: "btn", type: "button", on: { click: () => openApp("contact") } }, "Contact")))),
+      C.about.map((p) => h("p", null, p)),
+      h("p", { class: "meta", style: "margin-top:18px" }, `${C.education.school} — ${C.education.degree} · ${C.education.when}`));
+  }
+
+  function buildExperience() {
+    return h("div", { class: "app pad log" },
+      h("p", { class: "meta" }, "$ tail -n 50 /var/log/raihan/experience.log"),
+      C.experience.map((e) => h("div", { class: "entry" },
+        h("div", { class: "ts" }, e.when),
+        h("div", null,
+          h("div", null, h("span", { class: "lvl" }, "INFO"), h("b", null, e.role)),
+          h("div", { class: "meta" }, `${e.org} · ${e.where}`),
+          h("ul", null, e.points.map((p) => h("li", null, p)))))),
+      h("p", { class: "meta", style: "margin-top:14px" }, `${C.education.when.split(" ")[0]} → ${C.education.when.split(" ")[2]}  ${C.education.school} — ${C.education.degree}`));
+  }
+
+  function buildProjects() {
+    const pane = h("div", { class: "pane app pad" });
+    const navBtns = [];
+    const show = (p) => {
+      navBtns.forEach((b) => b.setAttribute("aria-current", b.dataset.id === p.id));
+      pane.replaceChildren(
+        h("p", { class: "lbl-sm" }, p.tag), h("h2", null, p.name),
+        h("p", { style: "margin-top:10px" }, p.desc), h("p", null, p.more),
+        p.why ? h("p", { class: "meta" }, p.why) : null,
+        h("div", { class: "row", style: "margin:4px 0 16px" }, p.stack.map((t) => h("span", { class: "chip" }, t))),
+        h("div", { class: "row" },
+          p.demo ? ext("▶ Run live demo", p.demo, "btn primary") : null,
+          ext("Source on GitHub ↗", p.repo, "btn")),
+        p.pipeline ? h("div", { class: "pipeline" }, h("div", { class: "dim" }, "# analysis pipeline"), p.pipeline.map((s) => h("div", null, h("span", null, "→ "), s))) : null);
+      pane.scrollTop = 0;
+    };
+    const nav = h("nav", { "aria-label": "Projects" },
+      C.projects.map((p) => { const b = h("button", { type: "button", "data-id": p.id, on: { click: () => show(p) } }, icon("folder"), p.name); navBtns.push(b); return b; }),
+      ext("More on GitHub ↗", C.links.github[1], "btn"));
+    nav.lastChild.style.marginTop = "auto";
+    show(C.projects[0]);
+    return h("div", { class: "explorer" }, nav, pane);
+  }
+
+  function buildCerts(past) {
+    const list = past ? C.pastCerts : C.certs;
+    return h("div", { class: "app pad" },
+      h("p", { class: "meta", style: "margin-bottom:14px" }, past
+        ? "Expired certifications, kept for the record. Verification links still work where the issuer keeps them."
+        : `${list.length} active certifications. Click a stamp to verify with the issuer.`),
+      h("div", { class: "certs" }, list.map((c) => h("div", { class: "cert" + (past ? " past" : "") },
+        h("div", null, h("h3", null, c.n), h("div", { class: "meta" }, `${c.i} · ${c.d}`)),
+        c.v ? ext(past ? "EXPIRED · VERIFY ↗" : "VERIFIED ✓", c.v, "stamp") : h("span", { class: "stamp idonly" }, "ID " + c.id)))),
+      past ? null : h("p", { class: "meta", style: "margin-top:16px" }, `+ ${C.pastCerts.length} past certifications in `, h("button", { type: "button", class: "btn", style: "min-height:30px;padding:0 10px", on: { click: () => openApp("archive") } }, "archive/")));
+  }
+
+  function buildWriting() {
+    return h("div", { class: "app pad feed" },
+      h("p", { class: "meta" }, `${C.articles.length} articles on OSINT, threat intel and security operations`),
+      C.articles.map(([t, u], i) => h("a", { class: "item", href: u, target: "_blank", rel: "noopener noreferrer" },
+        h("span", { class: "n" }, String(i + 1).padStart(2, "0")), h("span", { class: "t" }, t), h("span", { class: "dim", style: "margin-left:auto" }, "↗"))),
+      h("p", { style: "margin-top:16px" }, ext("All articles on Medium ↗", C.links.medium[1])));
+  }
+
+  function buildContact() {
+    const mail = C.links.email;
+    const copy = h("button", { type: "button", class: "btn", style: "min-height:30px;padding:0 10px" }, "copy");
+    copy.addEventListener("click", async () => {
+      try { await navigator.clipboard.writeText(mail); copy.textContent = "copied ✓"; }
+      catch (e) { const r = document.createRange(); r.selectNodeContents(mailEl); const s = getSelection(); s.removeAllRanges(); s.addRange(r); copy.textContent = "selected — press Ctrl+C"; }
+      setTimeout(() => (copy.textContent = "copy"), 2200);
+    });
+    const mailEl = h("a", { href: "mailto:" + mail }, mail);
+    const L = C.links;
+    return h("div", { class: "app pad" },
+      h("div", { class: "vcard" }, h("img", { src: PHOTO, alt: "", width: 84, height: 84 }),
+        h("div", null, h("h2", null, C.name), h("div", { class: "meta" }, "SOC Analyst (L1) · Jakarta, UTC+7"))),
+      h("dl", { class: "kv" },
+        h("dt", null, "EMAIL"), h("dd", null, mailEl, " ", copy),
+        h("dt", null, "LINKEDIN"), h("dd", null, ext(L.linkedin[0], L.linkedin[1])),
+        h("dt", null, "GITHUB"), h("dd", null, ext(L.github[0], L.github[1])),
+        h("dt", null, "TRYHACKME"), h("dd", null, ext(L.tryhackme[0], L.tryhackme[1])),
+        h("dt", null, "MEDIUM"), h("dd", null, ext(L.medium[0], L.medium[1])),
+        h("dt", null, "INSTAGRAM"), h("dd", null, ext(L.instagram[0], L.instagram[1]))),
+      h("p", { class: "meta", style: "margin-top:20px" }, "Open to opportunities in security operations, consulting and GRC. Email is fastest."));
+  }
+
+  function buildCV() {
+    return h("div", { class: "app pad" },
+      h("h2", null, "cv.pdf"), h("p", { class: "meta" }, "A4 · generated from this site's content · no phone number or ID numbers"),
+      h("p", { style: "margin-top:12px" }, "Summary, experience, projects, education, certifications and skills on two pages."),
+      h("div", { class: "row" }, h("a", { class: "btn primary", href: "/cv.pdf" }, "Download cv.pdf")),
+      PREVIEW ? h("p", { class: "meta", style: "margin-top:14px" }, "# preview build: the PDF goes live when the site is deployed") : null);
+  }
+
+  function buildScan() {
+    const fill = h("i");
+    const tbody = h("tbody");
+    const status = h("p", { class: "meta" }, "Starting scan…");
+    const skills = h("div", { class: "skills", hidden: true },
+      h("p", { class: "lbl-sm" }, "Full skill inventory"),
+      C.skills.map(([g, xs]) => h("div", null, h("div", { class: "p", style: "margin-bottom:6px" }, g), h("div", { class: "row" }, xs.map((x) => h("span", { class: "chip" }, x))))));
+    const rescan = h("button", { type: "button", class: "btn", on: { click: () => run() } }, "Rescan");
+    let timer;
+    function run() {
+      clearInterval(timer); tbody.replaceChildren(); skills.hidden = true; fill.style.width = "0%";
+      status.textContent = "Scanning 1 host (raihan, 127.0.0.1)…";
+      let i = 0;
+      const step = () => {
+        const [port, svc, note] = C.ports[i];
+        tbody.append(h("tr", null, h("td", null, port), h("td", { class: "open" }, "open"), h("td", null, svc), h("td", { class: "dim" }, note)));
+        i++; fill.style.width = (i / C.ports.length * 100) + "%";
+        if (i >= C.ports.length) { clearInterval(timer); status.textContent = `Scan done: 1 host up, ${C.ports.length} open ports. Hire-ability: high.`; skills.hidden = false; }
+      };
+      if (reduceMotion) { while (i < C.ports.length) step(); } else timer = setInterval(step, 160);
+    }
+    setTimeout(run, 60);
+    return h("div", { class: "app pad scan" },
+      h("div", { class: "row", style: "justify-content:space-between;align-items:center" }, h("h2", null, "nmap -sV raihan"), rescan),
+      status, h("div", { class: "bar", role: "presentation" }, fill),
+      h("div", { class: "tbl" }, h("table", null, h("thead", null, h("tr", null, h("th", null, "PORT"), h("th", null, "STATE"), h("th", null, "SERVICE"), h("th", null, "NOTES"))), tbody)),
+      skills);
+  }
+
+  /* =====================================================================
+     WINDOW MANAGER
+     ===================================================================== */
+  const desk = $("desk"), taskbar = $("taskbar");
+  const wins = new Map();
+  let z = 10, cascade = 0;
+
+  function openApp(id) {
+    const app = APPS[id]; if (!app) return null;
+    let w = wins.get(id);
+    if (!w) w = createWin(id, app);
+    w.el.classList.remove("min");
+    focusWin(id);
+    updateWall();
+    return w;
+  }
+
+  function createWin(id, app) {
+    const body = h("div", { class: "wbody" });
+    const el = h("section", { class: "win", role: "dialog", "aria-label": app.label, tabindex: "-1" },
+      h("div", { class: "wbar" },
+        h("span", { class: "wi" }, icon(app.ico)), h("span", { class: "wt" }, app.title),
+        h("div", { class: "wbtns" },
+          h("button", { type: "button", class: "back", "aria-label": "Back to home", on: { click: () => closeWin(id) } }, icon("back"), "back"),
+          h("button", { type: "button", class: "min", "aria-label": "Minimize", on: { click: () => minWin(id) } }, icon("min")),
+          h("button", { type: "button", class: "max", "aria-label": "Maximize", on: { click: () => toggleMax(id) } }, icon("max")),
+          h("button", { type: "button", class: "close", "aria-label": "Close", on: { click: () => closeWin(id) } }, icon("x")))),
+      body);
+    body.append(id === "terminal" ? TERM.el : app.build());
+    const dw = desk.clientWidth, dh = desk.clientHeight;
+    const w = Math.min(app.w, dw - 32), hgt = Math.min(app.h, dh - 32);
+    const x = Math.max(8, Math.min(dw - w - 8, 140 + cascade * 30)), y = Math.max(8, Math.min(dh - hgt - 8, 24 + cascade * 26));
+    cascade = (cascade + 1) % 6;
+    Object.assign(el.style, { left: x + "px", top: y + "px", width: w + "px", height: hgt + "px" });
+    if (tablet.matches) el.classList.add("max");
+    desk.append(el);
+    const task = h("button", { type: "button", class: "task", on: { click: () => taskClick(id) } }, icon(app.ico), app.label);
+    taskbar.append(task);
+    el.addEventListener("pointerdown", () => focusWin(id), true);
+    el.addEventListener("keydown", (e) => { if (e.key === "Escape" && id !== "terminal") closeWin(id); });
+    const bar = el.querySelector(".wbar");
+    bar.addEventListener("dblclick", (e) => { if (!e.target.closest("button")) toggleMax(id); });
+    makeDraggable(el, bar);
+    const rec = { el, task };
+    wins.set(id, rec);
+    return rec;
+  }
+
+  function focusWin(id) {
+    wins.forEach((w, k) => { w.el.classList.toggle("focused", k === id); w.task.classList.toggle("active", k === id && !w.el.classList.contains("min")); });
+    const w = wins.get(id); if (!w) return;
+    w.el.style.zIndex = ++z;
+    if (id === "terminal") { if (finePointer) TERM.focus(); }
+    else if (!w.el.contains(document.activeElement)) w.el.focus({ preventScroll: true });
+  }
+  function minWin(id) { const w = wins.get(id); if (!w) return; w.el.classList.add("min"); w.task.classList.add("min"); w.task.classList.remove("active"); updateWall(); }
+  function toggleMax(id) { const w = wins.get(id); if (w) { w.el.classList.toggle("max"); updateWall(); } }
+  function closeWin(id) {
+    const w = wins.get(id); if (!w) return;
+    w.el.remove(); w.task.remove(); wins.delete(id); updateWall();
+    const icn = document.querySelector(`.icon[data-app="${id}"]`); if (icn && !phone.matches) icn.focus({ preventScroll: true });
+  }
+  function taskClick(id) {
+    const w = wins.get(id);
+    if (w.el.classList.contains("min")) { w.el.classList.remove("min"); w.task.classList.remove("min"); focusWin(id); }
+    else if (w.el.classList.contains("focused")) minWin(id);
+    else focusWin(id);
+    updateWall();
+  }
+
+  function makeDraggable(el, handle) {
+    let sx, sy, ox, oy, dragging = false;
+    handle.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0 || e.target.closest("button") || el.classList.contains("max") || phone.matches) return;
+      dragging = true; el.classList.add("dragging");
+      sx = e.clientX; sy = e.clientY; ox = el.offsetLeft; oy = el.offsetTop;
+      handle.setPointerCapture(e.pointerId);
+    });
+    handle.addEventListener("pointermove", (e) => {
+      if (!dragging) return;
+      const maxX = desk.clientWidth - 80, maxY = desk.clientHeight - 38;
+      el.style.left = Math.max(80 - el.offsetWidth, Math.min(maxX, ox + e.clientX - sx)) + "px";
+      el.style.top = Math.max(0, Math.min(maxY, oy + e.clientY - sy)) + "px";
+    });
+    const end = () => { dragging = false; el.classList.remove("dragging"); };
+    handle.addEventListener("pointerup", end); handle.addEventListener("pointercancel", end);
+  }
+
+  /* ---------- desktop icons ---------- */
+  const ORDER = ["terminal", "about", "experience", "projects", "certs", "writing", "portscan", "contact", "cv", "archive"];
+  const iconsNav = $("icons");
+  ORDER.forEach((id) => iconsNav.append(h("button", { type: "button", class: "icon", "data-app": id, on: { click: () => openApp(id) } },
+    h("span", { class: "glyph" }, icon(APPS[id].ico)), h("span", { class: "lbl" }, APPS[id].label))));
+
+  /* ---------- top bar: clock + brand menu; desktop context menu ---------- */
+  const clock = $("clock");
+  const tick = () => { try { clock.textContent = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" }).format(new Date()) + " WIB"; } catch (e) { /* no Intl tz */ } };
+  tick(); setInterval(tick, 20000);
+
+  let menuEl = null;
+  function closeMenu() { if (menuEl) { menuEl.remove(); menuEl = null; $("brand").setAttribute("aria-expanded", "false"); } }
+  function showMenu(x, y) {
+    closeMenu();
+    const cur = document.body.dataset.term || "nightshift";
+    menuEl = h("div", { class: "menu", role: "menu" },
+      h("button", { type: "button", role: "menuitem", on: { click: () => { closeMenu(); openApp("terminal"); } } }, icon("term"), "Open Terminal"),
+      h("button", { type: "button", role: "menuitem", on: { click: () => { closeMenu(); openApp("about"); } } }, icon("file"), "About Raihan"),
+      h("hr"), h("div", { class: "sub" }, "Theme"),
+      Object.keys(THEMES).map((t) => h("button", { type: "button", role: "menuitemradio", "aria-checked": String(t === cur), class: t === cur ? "on" : null, on: { click: () => { closeMenu(); setTheme(t); } } }, t)),
+      h("hr"),
+      h("button", { type: "button", role: "menuitem", on: { click: () => { closeMenu(); restart(); } } }, "Restart RaihanOS"));
+    document.body.append(menuEl);
+    const r = menuEl.getBoundingClientRect();
+    menuEl.style.left = Math.max(8, Math.min(innerWidth - r.width - 8, x)) + "px";
+    menuEl.style.top = Math.max(8, Math.min(innerHeight - r.height - 8, y)) + "px";
+    menuEl.querySelector("button").focus();
+  }
+  $("brand").addEventListener("click", (e) => { e.stopPropagation(); if (menuEl) return closeMenu(); const r = e.currentTarget.getBoundingClientRect(); showMenu(r.left, r.bottom + 4); $("brand").setAttribute("aria-expanded", "true"); });
+  desk.addEventListener("contextmenu", (e) => { if (e.target.closest(".win")) return; e.preventDefault(); showMenu(e.clientX, e.clientY); });
+  document.addEventListener("pointerdown", (e) => { if (menuEl && !menuEl.contains(e.target) && !e.target.closest("#brand")) closeMenu(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenu(); });
+
+  /* ---------- theme ---------- */
+  function setTheme(name) {
+    if (name === "nightshift") delete document.body.dataset.term; else document.body.dataset.term = name;
+    try { localStorage.setItem("term-theme", name); } catch (e) { /* storage unavailable */ }
+    readWallColors();
+  }
+  try { const t = localStorage.getItem("term-theme"); if (t && THEMES[t]) { if (t !== "nightshift") document.body.dataset.term = t; } } catch (e) { /* ignore */ }
+
+  /* =====================================================================
+     WALLPAPER — a slow network of nodes; paused when hidden or covered
+     ===================================================================== */
+  const cv = $("wall"), ctx = cv.getContext("2d");
+  let nodes = [], W = 0, H = 0, dpr = 1, wallColors = {}, running = false, last = 0;
+  function readWallColors() { const cs = getComputedStyle(document.body); wallColors = { line: cs.getPropertyValue("--border").trim(), node: cs.getPropertyValue("--path").trim(), hot: cs.getPropertyValue("--user").trim() }; drawWall(); }
+  function sizeWall() {
+    dpr = Math.min(2, devicePixelRatio || 1); W = desk.clientWidth; H = desk.clientHeight;
+    cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const n = Math.round(Math.min(48, Math.max(18, (W * H) / 26000)));
+    nodes = Array.from({ length: n }, () => ({ x: Math.random() * W, y: Math.random() * H, vx: (Math.random() - .5) * .18, vy: (Math.random() - .5) * .18, hot: Math.random() < .08 }));
+    drawWall();
+  }
+  function drawWall() {
+    if (!W) return;
+    ctx.clearRect(0, 0, W, H);
+    const R = 150;
+    ctx.lineWidth = 1;
+    for (let i = 0; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) {
+      const a = nodes[i], b = nodes[j], d = Math.hypot(a.x - b.x, a.y - b.y);
+      if (d < R) { ctx.globalAlpha = (1 - d / R) * .55; ctx.strokeStyle = wallColors.line; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); }
+    }
+    for (const p of nodes) { ctx.globalAlpha = p.hot ? .9 : .5; ctx.fillStyle = p.hot ? wallColors.hot : wallColors.node; ctx.beginPath(); ctx.arc(p.x, p.y, p.hot ? 2.6 : 1.6, 0, 7); ctx.fill(); }
+    ctx.globalAlpha = 1;
+  }
+  function loop(t) {
+    if (!running) return;
+    if (t - last > 33) {          // ~30 fps is plenty for a drifting wallpaper
+      last = t;
+      for (const p of nodes) { p.x += p.vx; p.y += p.vy; if (p.x < 0 || p.x > W) p.vx *= -1; if (p.y < 0 || p.y > H) p.vy *= -1; }
+      drawWall();
+    }
+    requestAnimationFrame(loop);
+  }
+  function updateWall() {
+    let covered = false;
+    wins.forEach((w) => { if (!w.el.classList.contains("min") && (w.el.classList.contains("max") || phone.matches)) covered = true; });
+    const should = !reduceMotion && !document.hidden && !covered;
+    if (should && !running) { running = true; requestAnimationFrame(loop); }
+    else if (!should) running = false;
+  }
+  document.addEventListener("visibilitychange", updateWall);
+  let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { sizeWall(); updateWall(); }, 150); });
+
+  /* =====================================================================
+     TERMINAL APP
+     ===================================================================== */
+  const TERM = (() => {
+    const el = document.importNode($("tpl-term").content, true).firstElementChild;
+    const q = (sel) => el.querySelector(sel);
+    const out = q("#out"), bootEl = q("#bootout"), screen = q("#screen"), input = q("#cmd"), form = q("#form");
+
+    const s = (t, c) => ({ t, c });
+    const a = (t, href) => ({ t, href });
+    const k = (t, run) => ({ t, run: run || t });
+    const ln = (...segs) => ({ segs: segs.map((x) => (typeof x === "string" ? { t: x } : x)) });
+    const lc = (cls, ...segs) => Object.assign(ln(...segs), { cls });
+    const gap = () => ln();
+    const pad = (str, n) => str + " ".repeat(Math.max(1, n - str.length));
+    const previewNote = (what) => PREVIEW ? [ln(s(`# preview build: ${what} goes live when the site is deployed`, "dim"))] : [];
+    const certLine = (c, past) => [ln(s("● ", past ? "dim" : "ok"), s(c.n, "b")), ln("  ", s(`${c.i} · ${c.d}`, "dim"), "  ", c.v ? a("verify ↗", c.v) : s(`ID ${c.id}`, "dim"))];
+    const L = C.links;
+
+    const BANNER = [
+      "██████╗  █████╗ ██╗██╗  ██╗ █████╗ ███╗   ██╗",
+      "██╔══██╗██╔══██╗██║██║  ██║██╔══██╗████╗  ██║",
+      "██████╔╝███████║██║███████║███████║██╔██╗ ██║",
+      "██╔══██╗██╔══██║██║██╔══██║██╔══██║██║╚██╗██║",
+      "██║  ██║██║  ██║██║██║  ██║██║  ██║██║ ╚████║",
+      "╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝",
+      "",
+      "██████╗  █████╗ ██╗  ██╗███╗   ███╗ █████╗ ███╗   ██╗",
+      "██╔══██╗██╔══██╗██║  ██║████╗ ████║██╔══██╗████╗  ██║",
+      "██████╔╝███████║███████║██╔████╔██║███████║██╔██╗ ██║",
+      "██╔══██╗██╔══██║██╔══██║██║╚██╔╝██║██╔══██║██║╚██╗██║",
+      "██║  ██║██║  ██║██║  ██║██║ ╚═╝ ██║██║  ██║██║ ╚████║",
+      "╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝",
+    ];
+    const FILES = { "about.txt": "about", "experience.log": "experience", "projects/": "projects", "certs/": "certs",
+      "archive/": "certs --all", "skills.md": "skills", "writing/": "writing", "contact.vcf": "contact", "cv.pdf": "cv" };
+
+    const COMMANDS = {
+      help: () => {
+        const rows = [["about", "who I am and what I do", "about"], ["experience", "work and volunteering", "experience"], ["education", "university", "education"],
+          ["projects", "things I've built", "projects"], ["open <name>", "open a project (try: open ioc-router)", "open ioc-router"],
+          ["certs", "active certifications (certs --all for past)", "certs"], ["skills", "tools and frameworks", "skills"],
+          ["writing", "articles on Medium", "writing"], ["contact", "email and socials", "contact"], ["cv", "download my CV (PDF)", "cv"],
+          ["gui", "minimise the terminal, show the desktop", "gui"], ["start <app>", "open a desktop app (start portscan)", "start portscan"],
+          ["theme <name>", "change colours (theme to list)", "theme"], ["lang id", "Bahasa Indonesia", "lang id"],
+          ["whoami · ls · cat · history · clear", "the usual suspects", "whoami"]];
+        return [ln(s("Available commands", "h")), gap(),
+          ...rows.map(([c, d, r]) => ln(k(c, r), " ".repeat(Math.max(2, 18 - c.length)), s(d, "dim"))),
+          gap(), ln(s("Tab autocompletes · ↑/↓ history · Ctrl+L clears · any key skips the animation", "dim")),
+          ln(s("There may be a few undocumented commands. Happy hunting.", "dim"))];
+      },
+      about: () => [ln(s(C.name, "h"), s(" — " + C.role, "dim")), gap(), ...C.about.flatMap((p) => [ln(p), gap()]).slice(0, -1)],
+      experience: () => C.experience.flatMap((e, i) => [
+        ln(s(e.role, "b"), s(" @ " + e.org, "p")), ln(s(`${e.when} · ${e.where}`, "dim")),
+        ...e.points.map((p) => ln("  - " + p)), ...(i < C.experience.length - 1 ? [gap()] : [])]),
+      education: () => [ln(s(C.education.school, "b"), " — " + C.education.degree), ln(s(C.education.when + " · Jakarta", "dim"))],
+      projects: () => [...C.projects.flatMap((p, i) => {
+        const l = ln("    ");
+        if (p.demo) l.segs.push(a("live demo ↗", p.demo), { t: "  " });
+        l.segs.push(a("source ↗", p.repo), { t: "  " }, k(`open ${p.id}`));
+        return [ln(s(`[${i + 1}] `, "dim"), s(p.name, "h"), s(`  (${p.tag})`, "dim")), ln("    " + p.desc), ln(s("    " + p.more, "dim")),
+          ln(s("    stack: ", "dim"), p.stack.join(" · ").toLowerCase()), l, gap()];
+      }), ln(s("More on GitHub: ", "dim"), a(L.github[0] + " ↗", L.github[1]))],
+      open: (args) => {
+        const qy = (args[0] || "").toLowerCase();
+        if (qy === "github") return openUrl(L.github[1], "GitHub");
+        const p = C.projects.find((x, i) => x.id === qy || x.alias.includes(qy) || String(i + 1) === qy);
+        if (!p) return [ln(s(`open: no project named "${args[0] || ""}".`, "err"), " Try ", k("open ioc-router"), " or ", k("open hackngo"), ".")];
+        return openUrl(args.includes("--source") || !p.demo ? p.repo : p.demo, p.name);
+      },
+      certs: (args) => {
+        const all = args.includes("--all") || args.includes("-a");
+        const lines = [ln(s(`Active certifications (${C.certs.length})`, "h")), gap(), ...C.certs.flatMap((c) => certLine(c))];
+        if (all) lines.push(gap(), ln(s(`Past certifications (${C.pastCerts.length})`, "h")), gap(), ...C.pastCerts.flatMap((c) => certLine(c, true)));
+        else lines.push(gap(), ln(s(`+ ${C.pastCerts.length} past certifications (incl. CEH). Run `, "dim"), k("certs --all")));
+        return lines;
+      },
+      skills: () => C.skills.map(([g, xs]) => ln(s(pad(g, 14), "p"), xs.join(", "))),
+      writing: () => [ln(s("Articles on Medium", "h")), gap(), ...C.articles.map(([t, u], i) => ln(s(`${String(i + 1).padStart(2, "0")}  `, "dim"), a(t, u))),
+        gap(), ln(s("All articles: ", "dim"), a(L.medium[0] + " ↗", L.medium[1]))],
+      contact: () => [ln(s(pad("email", 11), "p"), a(L.email, "mailto:" + L.email)),
+        ...["linkedin", "github", "tryhackme", "medium", "instagram"].map((n) => ln(s(pad(n, 11), "p"), a(L[n][0], L[n][1]))),
+        gap(), ln(s("Open to opportunities in security operations, consulting and GRC. Email is fastest.", "dim"))],
+      cv: () => [ln("Downloading ", a("cv.pdf", "/cv.pdf"), s(" — generated from this site's content, no phone or ID numbers.", "dim")), ...previewNote("cv.pdf")],
+      gui: () => { setTimeout(() => minWin("terminal"), reduceMotion ? 0 : 450); return [ln(s("→ ", "ok"), "Minimising terminal. Bring it back from the taskbar or the Terminal icon.")]; },
+      start: (args) => {
+        const id = (args[0] || "").toLowerCase().replace(/[/.].*$/, "");
+        const map = { about: "about", experience: "experience", projects: "projects", certs: "certs", writing: "writing", portscan: "portscan", scanner: "portscan", contact: "contact", cv: "cv", archive: "archive" };
+        if (!map[id]) return [ln("usage: start <app>   apps: ", ...Object.keys(ARGS_START).flatMap((x) => [k(x, "start " + x), { t: " " }]))];
+        setTimeout(() => openApp(map[id]), 120);
+        return [ln(s("→ ", "ok"), `Starting ${APPS[map[id]].label}`)];
+      },
+      lang: (args) => (args[0] || "").toLowerCase() === "id"
+        ? [ln("Beralih ke Bahasa Indonesia: ", a("/id/", "/id/")), ...previewNote("the Indonesian version")]
+        : [ln("usage: ", k("lang id"), s("   (English is the default)", "dim"))],
+      theme: (args) => {
+        const name = (args[0] || "").toLowerCase();
+        if (!name) { const cur = document.body.dataset.term || "nightshift";
+          return [ln(s("Themes", "h"), s(`  (current: ${cur})`, "dim")), gap(), ...Object.entries(THEMES).map(([n, d]) => ln(k(`theme ${n}`), " ".repeat(Math.max(2, 18 - n.length)), s(d, "dim")))]; }
+        if (!THEMES[name]) return [ln(s(`theme: unknown theme "${args[0]}".`, "err"), " Run ", k("theme"), " to list them.")];
+        setTheme(name); return [ln(s("✓ ", "ok"), `theme set to ${name}`)];
+      },
+      whoami: () => [ln("hacker"), ln(s("Logged in as a fellow hacker. The person you're looking for: ", "dim"), k("about"))],
+      pwd: () => [ln("/home/hacker/raihan")],
+      ls: () => [ln(...Object.keys(FILES).flatMap((f) => [k(f, FILES[f]), { t: "  " }]))],
+      cat: (args) => {
+        const f = args[0];
+        if (!f) return [ln("usage: cat <file>   (run ", k("ls"), " to see files)")];
+        if (f === "/etc/shadow" || f === "/etc/passwd") return [ln(s(`cat: ${f}: Permission denied`, "err")), ln(s("Nice try though.", "dim"))];
+        const t = FILES[f] || FILES[f + "/"]; if (!t) return [ln(s(`cat: ${f}: No such file or directory`, "err"))];
+        const [c, ...r] = t.split(" "); return COMMANDS[c](r);
+      },
+      cd: () => [ln(s("cd: this portfolio is a single directory. Try ", "dim"), k("ls"))],
+      history: () => hist.length ? hist.map((x, i) => ln(s(String(i + 1).padStart(4) + "  ", "dim"), x)) : [ln(s("no history yet", "dim"))],
+      clear: () => "CLEAR",
+      sudo: () => [ln(s("hacker is not in the sudoers file. This incident will be reported.", "err")), ln(s("(to /dev/null — this is a static site, there's no server to report to)", "dim"))],
+      nmap: () => [ln("Starting Nmap scan against raihan (127.0.0.1)"), ln("Host is up (0.0024s latency)."), gap(), ln(s("PORT       STATE  SERVICE", "b")),
+        ...C.ports.map(([p, sv, n]) => ln(pad(p, 11), s(pad("open", 7), "ok"), `${sv} (${n})`)),
+        gap(), ln(`Nmap done: 1 IP address (1 host up) scanned. ${C.ports.length} open ports.`), ln(s("Want the GUI version? ", "dim"), k("start portscan"))],
+      rm: () => [ln(s("rm: cannot remove: Read-only file system", "err")), ln(s("It's a static site. There's nothing here to break.", "dim"))],
+      exit: () => [ln("There's no escape. Try ", k("gui"), " for the desktop.")],
+    };
+    Object.assign(COMMANDS, { socials: COMMANDS.contact, email: COMMANDS.contact, certifications: COMMANDS.certs, resume: COMMANDS.cv, logout: COMMANDS.exit });
+    const HIDDEN = new Set(["sudo", "nmap", "rm", "exit", "logout", "socials", "email", "certifications", "resume", "pwd", "cd"]);
+    const ARGS_START = { about: 1, experience: 1, projects: 1, certs: 1, writing: 1, portscan: 1, contact: 1, cv: 1, archive: 1 };
+    const ARGS = { open: ["ioc-router", "hackngo", "github"], theme: Object.keys(THEMES), certs: ["--all"], lang: ["id"], cat: Object.keys(FILES), start: Object.keys(ARGS_START) };
+
+    function openUrl(url, label) {
+      let w = null; try { w = window.open(url, "_blank", "noopener"); } catch (e) { /* blocked */ }
+      return [ln(s("→ ", "ok"), `Opening ${label}: `, a(url.replace(/^https?:\/\//, "") + " ↗", url)), ...(w ? [] : [ln(s("  (if nothing opened, click the link above)", "dim"))])];
+    }
+
+    /* renderer */
+    let busy = false, skip = false, current = Promise.resolve();
+    const hist = []; let hIdx = 0;
+    const frame = () => new Promise((r) => requestAnimationFrame(() => r()));
+    const stick = () => { screen.scrollTop = screen.scrollHeight; };
+    function makeNode(seg) {
+      let n;
+      if (seg.href) { n = document.createElement("a"); n.href = seg.href; if (/^https?:/.test(seg.href)) { n.target = "_blank"; n.rel = "noopener noreferrer"; } }
+      else if (seg.run) { n = document.createElement("button"); n.type = "button"; n.dataset.run = seg.run; }
+      else n = document.createElement("span");
+      if (seg.c) n.className = seg.c;
+      return n;
+    }
+    async function print(lines, speed, target = out) {
+      for (const line of lines) {
+        const div = document.createElement("div"); div.className = "ln" + (line.cls ? " " + line.cls : ""); target.appendChild(div);
+        const parts = line.segs.map((seg) => { const n = makeNode(seg); div.appendChild(n); return [n, seg.t]; });
+        if (reduceMotion || skip || !speed || document.hidden) { parts.forEach(([n, t]) => (n.textContent = t)); continue; }
+        for (const [n, t] of parts) for (let i = 0; i < t.length;) {
+          if (skip) { n.textContent = t; break; }
+          i = Math.min(t.length, i + speed); n.textContent = t.slice(0, i); stick(); await frame();
+        }
+      }
+      stick();
+    }
+    function echo(cmd) {
+      out.append(h("div", { class: "ln" }, h("span", { class: "u" }, "hacker@raihanrahman"), ":", h("span", { class: "p" }, "~"), "$ ", cmd));
+    }
+    async function run(raw) {
+      const line = raw.trim(); echo(line);
+      if (!line) { stick(); return; }
+      if (hist[hist.length - 1] !== line) hist.push(line);
+      hIdx = hist.length;
+      const [name, ...args] = line.split(/\s+/);
+      const fn = COMMANDS[name.toLowerCase()];
+      const res = fn ? fn(args) : [ln(s(`command not found: ${name}`, "err"), ". Type ", k("help"), " to see what's available.")];
+      if (res === "CLEAR") { out.replaceChildren(); return; }
+      res.push(gap());
+      busy = true; skip = false;
+      await print(res, 9);
+      busy = false; skip = false;
+      live.textContent = res.map((l) => l.segs.map((x) => x.t).join("")).join("\n");
+    }
+    const enqueue = (cmd) => { if (busy) skip = true; current = current.then(() => run(cmd)); return current; };
+
+    form.addEventListener("submit", (e) => { e.preventDefault(); const v = input.value; input.value = ""; enqueue(v); });
+    input.addEventListener("keydown", (e) => {
+      const key = e.key.toLowerCase();
+      if (e.key === "ArrowUp") { if (hIdx > 0) input.value = hist[--hIdx]; e.preventDefault(); }
+      else if (e.key === "ArrowDown") { if (hIdx < hist.length - 1) input.value = hist[++hIdx]; else { hIdx = hist.length; input.value = ""; } e.preventDefault(); }
+      else if (e.key === "Tab" || (e.ctrlKey && key === "i")) { e.preventDefault(); complete(); }
+      else if (e.ctrlKey && key === "l") { e.preventDefault(); out.replaceChildren(); }
+      else if (e.ctrlKey && key === "c" && !getSelection().toString()) { e.preventDefault(); if (busy) skip = true; else { echo(input.value + "^C"); input.value = ""; stick(); } }
+    });
+    function complete() {
+      const v = input.value.replace(/^\s+/, ""), parts = v.split(/\s+/);
+      const prefix = parts[parts.length - 1].toLowerCase();
+      let pool, head = "";
+      if (parts.length <= 1) pool = Object.keys(COMMANDS).filter((n) => !HIDDEN.has(n));
+      else { pool = ARGS[parts[0].toLowerCase()] || []; head = parts.slice(0, -1).join(" ") + " "; }
+      const hits = pool.filter((x) => x.startsWith(prefix));
+      if (hits.length === 1) input.value = head + hits[0] + (parts.length <= 1 && ARGS[hits[0]] ? " " : "");
+      else if (hits.length > 1) {
+        let common = hits[0]; hits.forEach((x) => { while (!x.startsWith(common)) common = common.slice(0, -1); });
+        if (common.length > prefix.length) input.value = head + common;
+        else { echo(input.value); print([ln(s(hits.join("  "), "dim"))], 0); }
+      }
+      stick();
+    }
+
+    el.addEventListener("keydown", (e) => { if (busy && !["Shift", "Control", "Alt", "Meta"].includes(e.key)) skip = true; });
+    screen.addEventListener("pointerdown", () => { if (busy) skip = true; });
+    const tabBtn = el.querySelector('[data-act="tab"]');
+    tabBtn.addEventListener("pointerdown", (e) => e.preventDefault()); // keep the phone keyboard open
+    tabBtn.addEventListener("click", () => { complete(); if (finePointer) input.focus({ preventScroll: true }); });
+    el.addEventListener("click", (e) => {
+      const b = e.target.closest("button[data-run]");
+      if (b) { enqueue(b.dataset.run); if (finePointer) input.focus({ preventScroll: true }); return; }
+      if (finePointer && e.target.closest(".screen") && !e.target.closest("a") && getSelection().isCollapsed) input.focus({ preventScroll: true });
+    });
+
+    async function boot() {
+      busy = true;
+      await print(BANNER.map((b) => lc("banner", b)), 18, bootEl);
+      await print([gap(), ln(s(C.name, "b"), " · " + C.role), gap(),
+        ln(s("Welcome fellow hacker.", "b"), " Type ", k("help"), " or tap a command below to explore."),
+        ln(s("Prefer windows and icons? Run ", "dim"), k("gui"), s(" to see the desktop.", "dim")), gap()], 7, bootEl);
+      busy = false; skip = false;
+    }
+    return { el, focus: () => input.focus({ preventScroll: true }), start: () => { current = boot(); } };
+  })();
+
+  /* =====================================================================
+     BOOT SEQUENCE (POST → login → desktop with terminal maximised)
+     ===================================================================== */
+  const bootScr = $("boot"), bootLog = $("bootlog");
+  let bootSkip = false, booting = false;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, bootSkip ? 0 : ms));
+  async function bootSequence() {
+    booting = true; bootSkip = reduceMotion; bootScr.classList.remove("out"); bootLog.replaceChildren();
+    const lines = [
+      ["RaihanOS BIOS v2026.10 — POST", null], ["CPU: caffeine-powered analyst core @ 12h shifts", null], ["Memory test: 11 threat-intel providers ", "OK"],
+      ["Checking certifications: 7 active, 5 archived ", "OK"], ["Mounting /home/raihan ", "OK"], ["Starting portfolio.service ", "OK"], ["", null],
+      ["raihanrahman login: hacker", null], ["Password: ••••••••", null], ["Last login: from the internet", "w"],
+    ];
+    for (const [t, tag] of lines) {
+      bootLog.append(h("div", null, t, tag === "OK" ? h("span", { class: "ok" }, "[ OK ]") : null));
+      if (tag === "w") bootLog.lastChild.className = "w";
+      await sleep(t ? 110 : 60);
+    }
+    await sleep(260);
+    bootScr.classList.add("out"); booting = false;
+    setTimeout(() => bootScr.setAttribute("hidden", ""), 360);
+  }
+  const skipBoot = () => { if (booting) bootSkip = true; };
+  addEventListener("keydown", skipBoot); bootScr.addEventListener("pointerdown", skipBoot);
+
+  async function restart() {
+    wins.forEach((_, id) => closeWin(id));
+    bootScr.removeAttribute("hidden");
+    await bootSequence();
+    launchTerminal();
+  }
+  function launchTerminal() {
+    const w = openApp("terminal"); w.el.classList.add("max"); updateWall();
+  }
+
+  /* ---------- go ---------- */
+  readWallColors(); sizeWall();
+  let seen = false; try { seen = sessionStorage.getItem("raihanos-booted") === "1"; sessionStorage.setItem("raihanos-booted", "1"); } catch (e) { /* ignore */ }
+  (seen ? Promise.resolve(bootScr.setAttribute("hidden", "")) : bootSequence()).then(() => { launchTerminal(); TERM.start(); });
+})();
+</script>

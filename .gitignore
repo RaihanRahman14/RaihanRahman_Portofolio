@@ -1,0 +1,30 @@
+# --- OS & editor clutter ---
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+*~
+
+# --- Claude Code: kept on this machine only, never pushed ---
+CLAUDE.md
+CLAUDE.local.md
+.claude/settings.local.json
+
+# --- Secrets: this site should have none, but never let one slip in ---
+.env
+.env.*
+*.pem
+*.key
+
+# --- Local tooling & caches (nothing here is needed to build or serve the site) ---
+node_modules/
+__pycache__/
+*.pyc
+.wrangler/
+*.log
+
+# --- Scratch work ---
+drafts/
+*.tmp
